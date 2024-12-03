@@ -26,9 +26,10 @@ public class CarController : MonoBehaviour
     private bool isBraking; // Whether the car is braking
 
     // Gear system variables
-    [Header("Gear Settings")]
+    [Header("Car Initialization Settings")]
     public Gear currentGear = Gear.Park; // Start in Park
     private bool isHandbrakeEngaged = true; // Handbrake is engaged in Park
+    [SerializeField] private float steeringInputThreshold = 0.1f; // Threshold for joystick steering input
 
     // Variables to store car physics
     [Header("Ego Physics Settings")]
@@ -215,10 +216,16 @@ public class CarController : MonoBehaviour
             }
         }
 
-        // Check if manual control keys are pressed to disable automatic mode
-        bool manualInputDetected = Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.LeftArrow) ||
-                                   Input.GetKey(KeyCode.DownArrow) || Input.GetKey(KeyCode.RightArrow) ||
-                                   Input.GetKey(KeyCode.Space);
+        // Check if joystick or keyboard inputs are detected to disable automatic mode
+        bool manualInputDetected =
+            Mathf.Abs(Input.GetAxis("Steering")) > steeringInputThreshold || // Joystick steering threshold
+            Input.GetAxis("Accelerator") > -1f || // Joystick accelerator
+            Input.GetAxis("Brake") > -1f || // Joystick brake
+            Input.GetKey(KeyCode.UpArrow) || // Keyboard forward
+            Input.GetKey(KeyCode.LeftArrow) || // Keyboard left
+            Input.GetKey(KeyCode.DownArrow) || // Keyboard brake/reverse
+            Input.GetKey(KeyCode.RightArrow) || // Keyboard right
+            Input.GetKey(KeyCode.Space); // Keyboard brake
 
         if (manualInputDetected && isAutomaticMode)
         {
@@ -240,6 +247,8 @@ public class CarController : MonoBehaviour
             {
                 currentSpeed = rb.velocity.magnitude; // Speed in meters per second
             }
+
+            Debug.Log("Manual input detected. Switching to manual mode.");
         }
 
         if (isFollowingWaypoints) // If automatic mode is active, move towards the waypoint
@@ -432,52 +441,79 @@ public class CarController : MonoBehaviour
     // Method for getting user input for controlling the car
     private void GetInput()
     {
-        horizontalInput = Input.GetAxis("Horizontal"); // Get left/right input for steering
+        // Steering input: Joystick and keyboard separately
+        float joystickSteering = Input.GetAxis("Steering"); // Joystick input
+        float keyboardSteering = Input.GetAxis("Horizontal Keyboard"); // Keyboard input
+        horizontalInput = Mathf.Clamp(joystickSteering + keyboardSteering, -1f, 1f);
 
-        // Only get vertical input in Drive or Reverse
-        if (currentGear == Gear.Drive)
-        {
-            verticalInput = Mathf.Clamp(Input.GetAxis("Vertical"), 0f, 1f); // Forward only
-        }
-        else if (currentGear == Gear.Reverse)
-        {
-            verticalInput = -Mathf.Clamp(Input.GetAxis("Vertical"), 0f, 1f); // Reverse only
-        }
-        else
-        {
-            verticalInput = 0f; // No acceleration in Park or Neutral
-        }
+        // Accelerator input: Joystick and keyboard separately
+        float rawJoystickAccelerator = Input.GetAxis("Accelerator");
+        float normalizedJoystickAccelerator = Mathf.Clamp((rawJoystickAccelerator + 1) / 2, 0f, 1f);
+        float keyboardAccelerator = Mathf.Clamp(Input.GetAxis("Vertical Keyboard"), 0f, 1f); // Forward only
+        verticalInput = Mathf.Clamp(normalizedJoystickAccelerator + keyboardAccelerator, 0f, 1f);
 
-        isBraking = Input.GetKey(KeyCode.Space); // Check if the space key (brake) is pressed
+        // Brake input
+        float rawJoystickBrake = Input.GetAxis("Brake");
+        float normalizedJoystickBrake = Mathf.Clamp((rawJoystickBrake + 1) / 2, 0f, 1f);
+        float keyboardBrake = Mathf.Clamp(-Input.GetAxis("Vertical Keyboard"), 0f, 1f); // Reverse/brake only
+        float combinedBrakeInput = Mathf.Clamp(normalizedJoystickBrake + keyboardBrake, 0f, 1f);
+
+        isBraking = combinedBrakeInput > 0.1f;
+        currentBrakeForce = combinedBrakeInput * brakeForce;
+
+        // Debug logs
+        Debug.Log($"Steering: {horizontalInput}");
+        Debug.Log($"Accelerator: {verticalInput}");
+        Debug.Log($"Brake: {currentBrakeForce}");
     }
 
     // Method for handling car acceleration and braking
     private void HandleMotor()
     {
-        // Apply motor torque (force) to the front wheels for acceleration
-        frontLeftWheelCollider.motorTorque = verticalInput * motorForce;
-        frontRightWheelCollider.motorTorque = verticalInput * motorForce;
-
-        // Set the braking force if the car is braking or in Park
-        if (isBraking || isHandbrakeEngaged)
+        if (isBraking)
         {
-            currentBrakeForce = brakeForce;
+            // If braking, apply brake force and stop motor torque
+            frontLeftWheelCollider.motorTorque = 0f;
+            frontRightWheelCollider.motorTorque = 0f;
+            ApplyBraking(); // Apply braking force
         }
         else
         {
-            currentBrakeForce = 0f;
-        }
+            // Handle Drive and Reverse gears separately
+            if (currentGear == Gear.Drive)
+            {
+                // Apply positive motor torque for forward motion
+                frontLeftWheelCollider.motorTorque = verticalInput * motorForce;
+                frontRightWheelCollider.motorTorque = verticalInput * motorForce;
+            }
+            else if (currentGear == Gear.Reverse)
+            {
+                // Apply negative motor torque for reverse motion
+                frontLeftWheelCollider.motorTorque = -verticalInput * motorForce;
+                frontRightWheelCollider.motorTorque = -verticalInput * motorForce;
+            }
+            else
+            {
+                // No motor torque for other gears
+                frontLeftWheelCollider.motorTorque = 0f;
+                frontRightWheelCollider.motorTorque = 0f;
+            }
 
-        ApplyBraking(); // Apply the calculated braking force
+            // Release brakes when not braking
+            ApplyBraking(0f);
+        }
     }
 
     // Method for applying the braking force to all four wheels
-    private void ApplyBraking()
+    private void ApplyBraking(float brakeForceOverride = -1f)
     {
-        frontRightWheelCollider.brakeTorque = currentBrakeForce;
-        frontLeftWheelCollider.brakeTorque = currentBrakeForce;
-        rearLeftWheelCollider.brakeTorque = currentBrakeForce;
-        rearRightWheelCollider.brakeTorque = currentBrakeForce;
+        // If brakeForceOverride is not provided, use currentBrakeForce
+        float appliedBrakeForce = brakeForceOverride >= 0 ? brakeForceOverride : currentBrakeForce;
+
+        frontRightWheelCollider.brakeTorque = appliedBrakeForce;
+        frontLeftWheelCollider.brakeTorque = appliedBrakeForce;
+        rearLeftWheelCollider.brakeTorque = appliedBrakeForce;
+        rearRightWheelCollider.brakeTorque = appliedBrakeForce;
     }
 
     // Method for handling the car's steering
