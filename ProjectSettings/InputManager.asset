@@ -36,7 +36,7 @@ InputManager:
     invert: 0
     type: 2
     axis: 0
-    joyNum: 2
+    joyNum: 1
   - serializedVersion: 3
     m_Name: Vertical Keyboard
     descriptiveName: 
@@ -68,7 +68,7 @@ InputManager:
     invert: 0
     type: 2
     axis: 2
-    joyNum: 3
+    joyNum: 2
   - serializedVersion: 3
     m_Name: Brake
     descriptiveName: (-1) = Not pressed, (+1) = Fully pressed
@@ -84,7 +84,7 @@ InputManager:
     invert: 0
     type: 2
     axis: 1
-    joyNum: 3
+    joyNum: 2
   - serializedVersion: 3
     m_Name: Fire1
     descriptiveName: 
